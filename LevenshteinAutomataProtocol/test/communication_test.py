@@ -1,4 +1,4 @@
-from LevenshteinAutomataProtocol.src.communication import ServerSocket, ClientSocket
+from src.communication import ServerSocket, ClientSocket
 from phe import paillier
 
 m1 = {

@@ -1,5 +1,5 @@
 install:
-	pip install pyzmq phe numpy pytest
+	pip install -r requirements.txt
 
 test-communication:
 	pytest ./test/communication_test.py -k test_server -q &
@@ -9,3 +9,4 @@ test-ot:
 	pytest ./test/ot_test.py -k TestEncoder -q
 	pytest ./test/ot_test.py -k test_sender -q &
 	pytest ./test/ot_test.py -k test_receiver -q
+

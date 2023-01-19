@@ -1,9 +1,8 @@
-import sys
-
-from phe import paillier
 import numpy as np
 import numpy.typing as npt
-import LevenshteinAutomataProtocol.src.communication as com
+from phe import paillier
+
+import src.communication as com
 
 # The columns to send with OT will be split into chunks of 256 bytes (2048 bits)
 CHUNKS_LEN = 256
@@ -52,7 +51,7 @@ def decode_message(data: dict, len_enc: int) -> npt.NDArray:
 
 class OTSender:
     """
-    Representation of the Sender party in the one-out-of-N OT protocol
+    Representation of the Sender party in the one-out-of-N OT src
     :param n: the number of secrets to exchange.
     :param socket: the ServerSocket for the tcp communication.
     :param pk: a public key of a Paillier encryption scheme.
@@ -64,7 +63,7 @@ class OTSender:
 
     def send_secrets(self, matrix: npt.NDArray):
         """
-        Start the protocol for the OT.
+        Start the src for the OT.
         :param matrix: a np 2D array in which the columns will be the secrets.
         """
         choice_bits = self.socket.recv()  # the encrypted choice bit-vector received from the client
@@ -92,7 +91,7 @@ class OTSender:
 
 class OTReceiver:
     """
-    Representation of the Receiver party in the one-out-of-N OT protocol
+    Representation of the Receiver party in the one-out-of-N OT src
     :param n: the number of secrets to exchange.
     :param socket: the ClientSocket for the tcp communication.
     :param pk: a public key of a Paillier encryption scheme.

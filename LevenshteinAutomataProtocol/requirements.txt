@@ -1,0 +1,4 @@
+pyzmq
+phe
+numpy
+pytest

@@ -1,7 +1,7 @@
 import numpy as np
-from LevenshteinAutomataProtocol.src.ot import encode_message, decode_message, OTSender, OTReceiver
+from src.ot import encode_message, decode_message, OTSender, OTReceiver
 from phe import paillier
-from LevenshteinAutomataProtocol.src.communication import ServerSocket, ClientSocket
+from src.communication import ServerSocket, ClientSocket
 
 
 class TestEncoder:
