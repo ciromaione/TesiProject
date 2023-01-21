@@ -61,13 +61,13 @@ class GarbledDFA:
                 res[i] = arr
             self.garbled_arrays = res
 
-    def _garble_matrix(self, index):
+    def _garble_matrix(self, index: int):
         rows, cols = self.dfa.transition_matrix.shape
         gm = [[b'' for _ in range(cols)] for _ in range(rows)]
         for q in range(rows):
             for sigma in range(cols):
                 q1 = permute(self.r[index], q, rows)
-                x1 = ro_hash(self.keys[q1, index] + self.dfa.encode_symbol(sigma))
+                x1 = ro_hash(self.keys[q1, index] + self.dfa.alphabet.encode(sigma))
                 if index != self.word_len - 1:
                     next_perm_q = permute(
                         self.dfa.transition_matrix[q, sigma],
@@ -87,7 +87,7 @@ class Garbler:
         self._max_workers = os.cpu_count() + 4
         self.pk = pk
 
-    def start_oe(self, word_len, ot_ports: list[int]) -> bytes:
+    def start_oe(self, word_len: int, ot_ports: list[int]) -> bytes:
         n_states, cols = self.dfa.transition_matrix.shape
         keys = np.array([[np.random.bytes(KEY_LEN) for _ in range(word_len)] for _ in range(n_states)])
         r = tuple(np.random.randint(0, word_len) for _ in range(word_len))
@@ -103,25 +103,33 @@ class Garbler:
 
         return keys[permute(r[0], 0, n_states, True), 0]
 
-    def _perform_ot(self, port, n, gmatrix):
+    def _perform_ot(self, port: int, n: int, gmatrix: npt.NDArray):
         socket = com.ServerSocket(port)
         sender = ot.OTSender(n, socket, self.pk)
         sender.send_secrets(gmatrix)
 
 
 class Evaluator:
-    def __init__(self, pk: paillier.PaillierPublicKey, sk: paillier.PaillierPrivateKey, server_ip: str):
+    def __init__(
+            self,
+            pk: paillier.PaillierPublicKey,
+            sk: paillier.PaillierPrivateKey,
+            server_ip: str,
+            alphabet: utils.Alphabet
+    ):
         self.pk = pk
         self.sk = sk
         self.server_ip = server_ip
         self._max_workers = os.cpu_count() + 4
+        self.alphabet = alphabet
 
     def recv_enc_matrix(self, word: str, ot_ports: list[int]) -> npt.NDArray:
         futures_set = set()
         len_word = len(word)
         with cf.ProcessPoolExecutor(self._max_workers) as executor:
             for i in range(len_word):
-                future = executor.submit(self._perform_ot, i, ot_ports[i], len_word, word[i])
+                c_index = self.alphabet.decode(word[i].encode())
+                future = executor.submit(self._perform_ot, i, ot_ports[i], len_word, c_index)
                 futures_set.add(future)
 
             res = [None for _ in range(len(word))]
@@ -131,7 +139,7 @@ class Evaluator:
 
             return np.array(res).transpose()
 
-    def _perform_ot(self, i, port, n, x, len_enc):
+    def _perform_ot(self, i: int, port: int, n: int, x: int, len_enc: int):
         socket = com.ClientSocket(self.server_ip, port)
         receiver = ot.OTReceiver(n, socket, self.pk, self.sk, len_enc)
         col = receiver.recv_secret(x)

@@ -112,7 +112,7 @@ class OTReceiver:
         self.socket = socket
         self.len_enc_states = len_encoding_states
 
-    def recv_secret(self, choice) -> npt.NDArray:
+    def recv_secret(self, choice: int) -> npt.NDArray:
         """
         Request the chosen secret.
         :param choice: secret number requested 0 <= choice < n.
