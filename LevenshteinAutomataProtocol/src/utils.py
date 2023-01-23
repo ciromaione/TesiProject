@@ -1,6 +1,9 @@
+import os
 import numpy as np
 import numpy.typing as npt
 import math
+
+MAX_WORKERS = os.cpu_count() + 4
 
 
 class Alphabet:

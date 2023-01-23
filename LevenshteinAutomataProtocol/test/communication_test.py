@@ -21,7 +21,8 @@ def test_server():
     assert data == m1
     n = socket.send_wait(m2)
     pk2 = paillier.PaillierPublicKey(n)
-    socket.send(pk2.encrypt(10))
+    res = socket.send_wait(pk2.encrypt(10))
+    assert res
 
 
 def test_client():
@@ -30,3 +31,4 @@ def test_client():
     assert data == m2
     c = socket.send_wait(pk.n)
     assert sk.decrypt(c) == 10
+    socket.send(True)

@@ -1,8 +1,10 @@
 import numpy as np
 import numpy.typing as npt
 from phe import paillier
+import concurrent.futures as cf
 
 import src.communication as com
+from src.utils import MAX_WORKERS
 
 # The columns to send with OT will be split into chunks of 256 bytes (2048 bits)
 CHUNKS_LEN = 256
@@ -61,17 +63,47 @@ class OTSender:
         self.socket = socket
         self.public_key = pk
 
-    def send_secrets(self, matrix: npt.NDArray):
+    def send_secrets(self, garbled_arrays: list[npt.NDArray]):
         """
         Start the src for the OT.
-        :param matrix: a np 2D array in which the columns will be the secrets.
+        :param garbled_arrays: a list of np 2D array in which the columns will be the secrets.
         """
-        choice_bits = self.socket.recv()  # the encrypted choice bit-vector received from the client
-        secrets = tuple(encode_message(matrix[:, i]) for i in range(self.n))  # list of secrets encoded
+        choice_bits_list = self.socket.recv()  # the list of encrypted choice bit-vectors received from the client
+        instances = len(choice_bits_list)
+
+        futures_set = set()
+        with cf.ProcessPoolExecutor(MAX_WORKERS) as executor:
+            for i in range(instances):
+                future = executor.submit(
+                    self._encrypt_secret,
+                    self.n,
+                    self.public_key,
+                    i,
+                    garbled_arrays[i],
+                    choice_bits_list[i]
+                )
+                futures_set.add(future)
+
+        enc_cols = [None] * instances
+        for future in cf.as_completed(futures_set):
+            i, res = future.result()
+            enc_cols[i] = res
+
+        self.socket.send(enc_cols)
+
+    @staticmethod
+    def _encrypt_secret(
+            n: int,
+            pk: paillier.PaillierPublicKey,
+            index: int,
+            matrix: npt.NDArray,
+            choice_bits: list[paillier.EncryptedNumber]
+    ):
+        secrets = tuple(encode_message(matrix[:, i]) for i in range(n))  # list of secrets encoded
 
         # for the encoding the ciphertext is split in chunks
         n_ciphertexts = len(secrets[0]["vals"])  # number of chunks
-        ciphertexts = [self.public_key.encrypt(0) for _ in range(n_ciphertexts)]  # chunks initialized at 0
+        ciphertexts = [pk.encrypt(0) for _ in range(n_ciphertexts)]  # chunks initialized at 0
 
         # encryption of the chunks
         for b, s in zip(choice_bits, secrets):
@@ -79,14 +111,16 @@ class OTSender:
                 ciphertexts[i] += b * s["vals"][i]
 
         # encryption of the last chunk size
-        last_chunk_size = self.public_key.encrypt(0)
+        last_chunk_size = pk.encrypt(0)
         for i, b in enumerate(choice_bits):
             last_chunk_size += b * secrets[i]["lc"]
 
-        self.socket.send({
+        res = {
             "lc": last_chunk_size,
             "vals": ciphertexts
-        })
+        }
+
+        return index, res
 
 
 class OTReceiver:
@@ -112,18 +146,47 @@ class OTReceiver:
         self.socket = socket
         self.len_enc_states = len_encoding_states
 
-    def recv_secret(self, choice: int) -> npt.NDArray:
+    def recv_secrets(self, choices: list[int]) -> npt.NDArray:
         """
         Request the chosen secret.
-        :param choice: secret number requested 0 <= choice < n.
-        :return: the chosen column.
+        :param choices: list of secret numbers requested, 0 <= choice < n.
+        :return: the chosen columns.
         """
+        futures_set = set()
+        with cf.ProcessPoolExecutor(MAX_WORKERS) as executor:
+            for i, choice in enumerate(choices):
+                future = executor.submit(self._encrypt_choice, self.public_key, self.n, i, choice)
+                futures_set.add(future)
+
+            enc_choices = [None] * len(choices)
+            for future in cf.as_completed(futures_set):
+                i, enc_choice = future.result()
+                enc_choices[i] = enc_choice
+
+            ciphertexts = self.socket.send_wait(enc_choices)  # the ciphertexts received from server.
+            futures_set = set()
+            for i, ciphertext in enumerate(ciphertexts):
+                future = executor.submit(self._decrypt_col, self.secret_key, self.len_enc_states, i, ciphertext)
+                futures_set.add(future)
+
+            res = [None] * len(choices)
+            for future in cf.as_completed(futures_set):
+                i, enc_col = future.result()
+                res[i] = enc_col
+
+            return np.array(res).transpose()
+
+    @staticmethod
+    def _encrypt_choice(pk: paillier.PaillierPublicKey, n: int, index: int, choice: int):
         # encode the choice as a vector of n values with 1 in position choice and 0 otherwise.
-        encoded_choice = [self.public_key.encrypt(1 if i == choice else 0) for i in range(self.n)]
-        ciphertext = self.socket.send_wait(encoded_choice)  # the ciphertext received from server.
-        lc = self.secret_key.decrypt(ciphertext["lc"])  # decryption of the last chunk size.
-        values = [self.secret_key.decrypt(v) for v in ciphertext["vals"]]  # decryption of the chunks.
-        return decode_message({  # decoding the decrypted secret.
+        enc_choice = [pk.encrypt(1 if i == choice else 0) for i in range(n)]
+        return index, enc_choice
+
+    @staticmethod
+    def _decrypt_col(sk: paillier.PaillierPrivateKey, len_enc_states: int, index: int, ciphertext):
+        lc = sk.decrypt(ciphertext["lc"])  # decryption of the last chunk size.
+        values = [sk.decrypt(v) for v in ciphertext["vals"]]  # decryption of the chunks.
+        return index, decode_message({  # decoding the decrypted secret.
             "lc": lc,
             "vals": values
-        }, self.len_enc_states)
+        }, len_enc_states)
