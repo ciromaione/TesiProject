@@ -55,5 +55,7 @@ class DFA:
     def output(self, state: int, symbol: int) -> bytes:
         """Returns the 0 if the next state from 'state' and 'symbol' is accepted."""
         next_state = self.transition_matrix[state, symbol]
-        out = 1 if next_state in self.accept else 0
+        out = 0
+        if next_state in self.accept:
+            out = 1
         return self.encode_state(out)

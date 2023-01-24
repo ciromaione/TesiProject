@@ -2,6 +2,7 @@ import numpy as np
 import numpy.typing as npt
 import concurrent.futures as cf
 from phe import paillier
+import hashlib
 
 import src.utils as utils
 import src.ot as ot
@@ -10,8 +11,8 @@ import src.communication as com
 KEY_LEN = 16
 
 
-def ro_hash(data: bytes) -> bytes:
-    return data
+def ro_hash(data: bytes, len_enc: int) -> bytes:
+    return hashlib.shake_256(data).digest(KEY_LEN + len_enc)
 
 
 def xor(x1: bytes, x2: bytes) -> bytes:
@@ -51,7 +52,7 @@ class Garbler:
         garbled_arrays = self._generate_garbled_arrays(keys, r, word_len)
         sender = ot.OTSender(self.dfa.alphabet.length, self.socket, self.pk)
         sender.send_secrets(garbled_arrays)
-        k0 = keys[permute(r[0], 0, n_states, True), 0]
+        k0 = keys[permute(r[0], 0, n_states), 0]
         self.socket.send(k0)
 
     def _generate_garbled_arrays(self, keys: npt.NDArray, r: tuple, word_len: int) -> list[npt.NDArray]:
@@ -73,7 +74,7 @@ class Garbler:
         for q in range(rows):
             for sigma in range(cols):
                 q1 = permute(r[index], q, rows)
-                x1 = ro_hash(keys[q1, index] + dfa.alphabet.encode(sigma))
+                x1 = ro_hash(keys[q1, index] + dfa.alphabet.encode(sigma), dfa.state_encoding_len)
                 if index != word_len - 1:
                     next_perm_q = permute(
                         dfa.transition_matrix[q, sigma],
@@ -82,7 +83,7 @@ class Garbler:
                     )
                     x2 = dfa.encode_state(next_perm_q) + keys[next_perm_q, index + 1]
                 else:
-                    x2 = dfa.output(q, sigma) + np.random.bytes(KEY_LEN)
+                    x2 = b'\x00' * KEY_LEN + dfa.output(q, sigma)
                 gm[q1][sigma] = xor(x1, x2)
         return index, np.array(gm)
 
@@ -115,28 +116,30 @@ class Evaluator:
         len_enc = len(enc_matrix[0, 0]) - KEY_LEN
 
         next_keys = []
-        x1 = ro_hash(k0 + ord(word[0]).to_bytes(1, 'big'))
+        x1 = ro_hash(k0 + word[0].encode(), len_enc)
         for g in enc_matrix[:, 0]:
             deg = xor(x1, g)
-            q, nk = split_key(len_enc, deg)
-            if q < n_states:
-                next_keys.append((q, nk))
+            nq, nk = split_key(len_enc, deg)
+            if nq < n_states:
+                next_keys.append((nq, nk))
 
-        for i in range(1, n_cols):
+        for i in range(1, n_cols - 1):
             tmp_keys = []
             for q, key in next_keys:
-                x1 = ro_hash(key + ord(word[i]).to_bytes(1, 'big'))
+                x1 = ro_hash(key + word[i].encode(), len_enc)
                 deg = xor(x1, enc_matrix[q, i])
                 nq, nk = split_key(len_enc, deg)
-                if q < n_states:
+                if nq < n_states:
                     tmp_keys.append((nq, nk))
             next_keys = tmp_keys
-        for res, _ in next_keys:
-            if res == 1:
-                return True
-            elif res == 0:
+        for q, key in next_keys:
+            x1 = ro_hash(key + word[n_cols - 1].encode(), len_enc)
+            deg = xor(x1, enc_matrix[q, n_cols - 1])
+            out = int.from_bytes(deg, 'big')
+            if out == 0:
                 return False
-
+            elif out == 1:
+                return True
         raise EvaluationException
 
 
