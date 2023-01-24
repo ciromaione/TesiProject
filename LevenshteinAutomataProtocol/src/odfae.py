@@ -1,8 +1,6 @@
 import numpy as np
 import numpy.typing as npt
 import concurrent.futures as cf
-import os
-import typing
 from phe import paillier
 
 import src.utils as utils
@@ -40,73 +38,53 @@ def split_key(len_enc: int, data: bytes) -> (int, bytes):
     return q, nk
 
 
-class GarbledDFA:
-    def __init__(self, dfa: utils.DFA, keys: npt.NDArray, r: tuple, word_len: int):
-        self.dfa = dfa
-        self.keys = keys
-        self.r = r
-        self.word_len = word_len
-        self._max_workers = os.cpu_count() + 4
-        self._generate_garbled_arrays()
-
-    def _generate_garbled_arrays(self):
-        futures_set = set()
-        with cf.ProcessPoolExecutor(self._max_workers) as executor:
-            for i in range(self.word_len):
-                future = executor.submit(self._garble_matrix, i)
-                futures_set.add(future)
-            res = [None for _ in range(self.word_len)]
-            for future in cf.as_completed(futures_set):
-                i, arr = future.result()
-                res[i] = arr
-            self.garbled_arrays = res
-
-    def _garble_matrix(self, index: int):
-        rows, cols = self.dfa.transition_matrix.shape
-        gm = [[b'' for _ in range(cols)] for _ in range(rows)]
-        for q in range(rows):
-            for sigma in range(cols):
-                q1 = permute(self.r[index], q, rows)
-                x1 = ro_hash(self.keys[q1, index] + self.dfa.alphabet.encode(sigma))
-                if index != self.word_len - 1:
-                    next_perm_q = permute(
-                        self.dfa.transition_matrix[q, sigma],
-                        self.r[index + 1],
-                        rows
-                    )
-                    x2 = self.dfa.encode_state(next_perm_q) + self.keys[next_perm_q, index + 1]
-                else:
-                    x2 = np.random.bytes(KEY_LEN) + self.dfa.output(q, sigma)
-                gm[q1][sigma] = xor(x1, x2)
-        return index, np.array(gm)
-
-
 class Garbler:
-    def __init__(self, dfa: utils.DFA, pk: paillier.PaillierPublicKey):
+    def __init__(self, dfa: utils.DFA, pk: paillier.PaillierPublicKey, socket: com.ServerSocket):
         self.dfa = dfa
-        self._max_workers = os.cpu_count() + 4
         self.pk = pk
+        self.socket = socket
 
-    def start_oe(self, word_len: int, ot_ports: list[int]) -> bytes:
+    def serve_evaluation(self, word_len: int):
         n_states, cols = self.dfa.transition_matrix.shape
         keys = np.array([[np.random.bytes(KEY_LEN) for _ in range(word_len)] for _ in range(n_states)])
         r = tuple(np.random.randint(0, word_len) for _ in range(word_len))
-        gdfa = GarbledDFA(self.dfa, keys, r, word_len)
+        garbled_arrays = self._generate_garbled_arrays(keys, r, word_len)
+        sender = ot.OTSender(self.dfa.alphabet.length, self.socket, self.pk)
+        sender.send_secrets(garbled_arrays)
+        k0 = keys[permute(r[0], 0, n_states, True), 0]
+        self.socket.send(k0)
 
+    def _generate_garbled_arrays(self, keys: npt.NDArray, r: tuple, word_len: int) -> list[npt.NDArray]:
         futures_set = set()
-        with cf.ProcessPoolExecutor(self._max_workers) as executor:
-            for port, gmatrix in zip(ot_ports, gdfa.garbled_arrays):
-                future = executor.submit(self._perform_ot, port, cols, gmatrix)
+        with cf.ProcessPoolExecutor(utils.MAX_WORKERS) as executor:
+            for i in range(word_len):
+                future = executor.submit(self._garble_matrix, i, self.dfa, keys, r, word_len)
                 futures_set.add(future)
+            res = [None] * word_len
+            for future in cf.as_completed(futures_set):
+                i, arr = future.result()
+                res[i] = arr
+            return res
 
-            cf.wait(futures_set)
-
-        return keys[permute(r[0], 0, n_states, True), 0]
-
-    def _perform_ot(self, port: int, n: int, gmatrix: npt.NDArray):
-        socket = com.ServerSocket(port)
-        sender = ot.OTSender(n, socket, self.pk)
-        sender.send_secrets(gmatrix)
+    @staticmethod
+    def _garble_matrix(index: int, dfa: utils.DFA, keys: npt.NDArray, r: tuple, word_len: int):
+        rows, cols = dfa.transition_matrix.shape
+        gm = [[b'' for _ in range(cols)] for _ in range(rows)]
+        for q in range(rows):
+            for sigma in range(cols):
+                q1 = permute(r[index], q, rows)
+                x1 = ro_hash(keys[q1, index] + dfa.alphabet.encode(sigma))
+                if index != word_len - 1:
+                    next_perm_q = permute(
+                        dfa.transition_matrix[q, sigma],
+                        r[index + 1],
+                        rows
+                    )
+                    x2 = dfa.encode_state(next_perm_q) + keys[next_perm_q, index + 1]
+                else:
+                    x2 = dfa.output(q, sigma) + np.random.bytes(KEY_LEN)
+                gm[q1][sigma] = xor(x1, x2)
+        return index, np.array(gm)
 
 
 class Evaluator:
@@ -114,39 +92,25 @@ class Evaluator:
             self,
             pk: paillier.PaillierPublicKey,
             sk: paillier.PaillierPrivateKey,
-            server_ip: str,
-            alphabet: utils.Alphabet
+            socket: com.ClientSocket,
+            alphabet: utils.Alphabet,
+            len_enc_state: int
     ):
         self.pk = pk
         self.sk = sk
-        self.server_ip = server_ip
-        self._max_workers = os.cpu_count() + 4
+        self.socket = socket
         self.alphabet = alphabet
+        self.len_enc_cell = len_enc_state + KEY_LEN
 
-    def recv_enc_matrix(self, word: str, ot_ports: list[int]) -> npt.NDArray:
-        futures_set = set()
-        len_word = len(word)
-        with cf.ProcessPoolExecutor(self._max_workers) as executor:
-            for i in range(len_word):
-                c_index = self.alphabet.decode(word[i].encode())
-                future = executor.submit(self._perform_ot, i, ot_ports[i], len_word, c_index)
-                futures_set.add(future)
-
-            res = [None for _ in range(len(word))]
-            for future in cf.as_completed(futures_set):
-                i, col = future.result()
-                res[i] = col
-
-            return np.array(res).transpose()
-
-    def _perform_ot(self, i: int, port: int, n: int, x: int, len_enc: int):
-        socket = com.ClientSocket(self.server_ip, port)
-        receiver = ot.OTReceiver(n, socket, self.pk, self.sk, len_enc)
-        col = receiver.recv_secret(x)
-        return i, col
+    def evaluate(self, word: str) -> bool:
+        choices = [self.alphabet.decode(c) for c in word]
+        receiver = ot.OTReceiver(self.alphabet.length, self.socket, self.pk, self.sk, self.len_enc_cell)
+        enc_matrix = receiver.recv_secrets(choices)
+        k0 = self.socket.recv()
+        return self._perform_degarbling(word, k0, enc_matrix)
 
     @staticmethod
-    def evaluate(word: str, k0: bytes, enc_matrix: npt.NDArray) -> bool:
+    def _perform_degarbling(word: str, k0: bytes, enc_matrix: npt.NDArray) -> bool:
         n_states, n_cols = enc_matrix.shape
         len_enc = len(enc_matrix[0, 0]) - KEY_LEN
 
@@ -167,7 +131,6 @@ class Evaluator:
                 if q < n_states:
                     tmp_keys.append((nq, nk))
             next_keys = tmp_keys
-
         for res, _ in next_keys:
             if res == 1:
                 return True

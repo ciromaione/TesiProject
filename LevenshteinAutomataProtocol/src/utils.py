@@ -11,8 +11,9 @@ class Alphabet:
         :param symbols: a string with the characters of the alphabet.
     """
     def __init__(self, symbols: str):
+        self.length = len(symbols)
         self._sym_mapping = tuple(ord(c) for c in symbols)
-        self._inv_sym_mapping = {c.encode(): c for c in symbols}
+        self._inv_sym_mapping = {chr(c): i for i, c in enumerate(self._sym_mapping)}
 
     def encode(self, symbol: int) -> bytes:
         """Encode the symbol into the corresponding utf-8 byte.
@@ -21,7 +22,7 @@ class Alphabet:
         """
         return self._sym_mapping[symbol].to_bytes(1, 'big')
 
-    def decode(self, symbol: bytes) -> int:
+    def decode(self, symbol: str) -> int:
         """Decode the utf-8 symbol into the corresponding index in the transition matrix.
         :param symbol: the utf-8 byte symbol.
         :return: the decoded symbol.

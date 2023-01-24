@@ -10,3 +10,7 @@ test-ot:
 	pytest ./test/ot_test.py -k test_sender -q &
 	pytest ./test/ot_test.py -k test_receiver -q
 
+test-odfae:
+	pytest ./test/odfae_test.py -k TestUtilsFunctions -q
+	pytest ./test/odfae_test.py -k test_garbler -q &
+	pytest ./test/odfae_test.py -k test_evaluator -q

@@ -89,7 +89,7 @@ class OTSender:
             i, res = future.result()
             enc_cols[i] = res
 
-        self.socket.send(enc_cols)
+        self.socket.send_wait(enc_cols)
 
     @staticmethod
     def _encrypt_secret(
@@ -164,6 +164,7 @@ class OTReceiver:
                 enc_choices[i] = enc_choice
 
             ciphertexts = self.socket.send_wait(enc_choices)  # the ciphertexts received from server.
+            self.socket.send(True)
             futures_set = set()
             for i, ciphertext in enumerate(ciphertexts):
                 future = executor.submit(self._decrypt_col, self.secret_key, self.len_enc_states, i, ciphertext)
