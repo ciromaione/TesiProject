@@ -11,6 +11,13 @@ import src.communication as com
 KEY_LEN = 16
 
 
+def gen_random_key() -> bytes:
+    while True:
+        k = np.random.bytes(KEY_LEN)
+        if len(k) == KEY_LEN:
+            return k
+
+
 def ro_hash(data: bytes, len_enc: int) -> bytes:
     return hashlib.shake_256(data).digest(KEY_LEN + len_enc)
 
@@ -47,7 +54,7 @@ class Garbler:
 
     def serve_evaluation(self, word_len: int):
         n_states, cols = self.dfa.transition_matrix.shape
-        keys = np.array([[np.random.bytes(KEY_LEN) for _ in range(word_len)] for _ in range(n_states)])
+        keys = np.array([[gen_random_key() for _ in range(word_len)] for _ in range(n_states)])
         r = tuple(np.random.randint(0, word_len) for _ in range(word_len))
         garbled_arrays = self._generate_garbled_arrays(keys, r, word_len)
         sender = ot.OTSender(self.dfa.alphabet.length, self.socket, self.pk)
