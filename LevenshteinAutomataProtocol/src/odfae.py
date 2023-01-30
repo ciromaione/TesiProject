@@ -92,7 +92,7 @@ class Garbler:
         sender = ot.OTSender(self.dfa.alphabet.length, self.socket, self.pk)
         sender.send_secrets(garbled_arrays)
         # Sending the first key to the evaluator.
-        k0 = keys[permute(r[0], 0, n_states), 0]
+        k0 = keys[permute(r[0], self.dfa.initial_state, n_states)][0]
         self.socket.send(k0)
 
     def _generate_garbled_arrays(self, keys: npt.NDArray, r: tuple, word_len: int) -> list[npt.NDArray]:

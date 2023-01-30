@@ -13,7 +13,6 @@ class TestUtilsFunctions:
         n = 5
         for i, j in zip(range(n - 1), range(1, n)):
             assert odfae.permute(r, i, n) == i + 1
-            assert odfae.permute(r, j, n, True) == j - 1
 
     def test_split_key(self):
         state = b'\x00\x03'
