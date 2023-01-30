@@ -48,7 +48,7 @@ def decode_message(data: dict, len_enc: int) -> npt.NDArray:
             print("value: ", v)
     raw += last.to_bytes(data["lc"], 'big')
     mess = [raw[i:i + len_enc] for i in range(0, len(raw), len_enc)]
-    return np.array(mess)
+    return np.array(mess, dtype=object)
 
 
 class OTSender:
@@ -191,7 +191,7 @@ class OTReceiver:
                 i, enc_col = future.result()
                 res[i] = enc_col
 
-            return np.array(res).transpose()
+            return np.array(res, dtype=object).transpose()
 
     @staticmethod
     def _encrypt_choice(pk: paillier.PaillierPublicKey, n: int, index: int, choice: int):

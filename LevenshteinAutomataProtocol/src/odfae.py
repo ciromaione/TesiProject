@@ -83,7 +83,7 @@ class Garbler:
         """
         n_states, cols = self.dfa.transition_matrix.shape
         # Generation of the |Q|·n random keys.
-        keys = np.array([[gen_random_key() for _ in range(word_len)] for _ in range(n_states)])
+        keys = np.array([[gen_random_key() for _ in range(word_len)] for _ in range(n_states)], dtype=object)
         # Generation of the random int array for the permutations.
         r = tuple(np.random.randint(0, word_len) for _ in range(word_len))
         # Generation of the n garbled arrays.
@@ -147,7 +147,7 @@ class Garbler:
                 else:
                     x2 = b'\x00' * KEY_LEN + dfa.output(q, sigma)  # In the last column we garble the outputs.
                 gm[q1][sigma] = xor(x1, x2)
-        return index, np.array(gm)
+        return index, np.array(gm, dtype=object)
 
 
 class Evaluator:
