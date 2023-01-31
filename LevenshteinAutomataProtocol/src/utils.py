@@ -59,3 +59,9 @@ class DFA:
         if next_state in self.accept:
             out = 1
         return self.encode_state(out)
+
+    def test_string(self, string):
+        state = self.initial_state
+        for ch in string:
+            state = self.transition_matrix[state, self.alphabet.decode(ch)]
+        return state in self.accept

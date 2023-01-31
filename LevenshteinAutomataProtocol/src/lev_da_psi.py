@@ -25,8 +25,7 @@ class Alice:
         pk = client_setup["pk"]
         words_lens = client_setup["wlen"]
         server_setup = {
-            "dfa_enc_len": [dfa.state_encoding_len for _, dfa in self.dfa_list],
-            "alpha": self.alphabet
+            "dfa_enc_len": [dfa.state_encoding_len for _, dfa in self.dfa_list]
         }
         self.socket.send(server_setup)
         for word, dfa in self.dfa_list:
@@ -42,10 +41,11 @@ class Alice:
 
 
 class Bob:
-    def __init__(self, words_list: list[str], server: str, port: int = DEFAULT_PORT):
+    def __init__(self, words_list: list[str], alpha: utils.Alphabet, server: str, port: int = DEFAULT_PORT):
         self.words_list = words_list
         self.socket = com.ClientSocket(server, port)
         self.result = []
+        self.alphabet = alpha
 
     def start(self):
         words_len = [len(w) for w in self.words_list]
@@ -56,9 +56,8 @@ class Bob:
         }
         server_setup = self.socket.send_wait(client_setup)
         dfa_enc_lens = server_setup["dfa_enc_len"]
-        alphabet = server_setup["alpha"]
         for enc_len in dfa_enc_lens:
-            evaluator = odfae.Evaluator(pk, sk, self.socket, alphabet, enc_len)
+            evaluator = odfae.Evaluator(pk, sk, self.socket, self.alphabet, enc_len)
             for word in self.words_list:
                 accepted = evaluator.evaluate(word)
                 if accepted:
