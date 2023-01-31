@@ -5,7 +5,6 @@ import src.utils as utils
 import src.lev_da_psi as psi
 
 alpha = utils.Alphabet("abcde")
-expected_res = {('cd', 'dcb'), ('abc', 'bce'), ('cd', 'bce'), ('cd', 'cda'), ('cd', 'bcda')}
 
 
 def test_alice():
@@ -21,6 +20,7 @@ def test_alice():
                 set(dfa["acceptance_state"])
             )
             alice.append((word, d))
+    expected_res = {('cd', 'dcb'), ('abc', 'bce'), ('cd', 'bce'), ('cd', 'cda'), ('cd', 'bcda')}
     server = psi.Alice(alice, alpha)
     server.start()
     assert set(server.result) == expected_res
@@ -29,6 +29,7 @@ def test_alice():
 def test_bob():
     with open("test/test_data/bob.txt") as b:
         bob = [line.strip() for line in b.readlines()]
+    expected_res = {('dcb', 'cd'), ('bce', 'abc'), ('bce', 'cd'), ('cda', 'cd'), ('bcda', 'cd')}
     client = psi.Bob(bob, alpha, "localhost")
     client.start()
     assert set(client.result) == expected_res

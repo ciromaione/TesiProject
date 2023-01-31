@@ -16,5 +16,5 @@ test-odfae:
 	pytest ./test/odfae_test.py -k test_evaluator -q
 
 test-psi:
-	pytest ./test/lev_da_psi.py -k test_alice -q &
-	pytest ./test/lev_da_psi.py -k test_bob -q
+	pytest ./test/lev_da_psi_test.py -k test_alice -q &
+	pytest ./test/lev_da_psi_test.py -k test_bob -q
