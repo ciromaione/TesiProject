@@ -14,3 +14,7 @@ test-odfae:
 	pytest ./test/odfae_test.py -k TestUtilsFunctions -q
 	pytest ./test/odfae_test.py -k test_garbler -q &
 	pytest ./test/odfae_test.py -k test_evaluator -q
+
+test-psi:
+	pytest ./test/lev_da_psi.py -k test_alice -q &
+	pytest ./test/lev_da_psi.py -k test_bob -q
