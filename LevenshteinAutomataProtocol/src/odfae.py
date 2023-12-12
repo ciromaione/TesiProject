@@ -3,6 +3,7 @@ import numpy.typing as npt
 import concurrent.futures as cf
 from phe import paillier
 import hashlib
+import os
 
 import src.utils as utils
 import src.ot as ot
@@ -13,10 +14,7 @@ KEY_LEN = 16
 
 def gen_random_key() -> bytes:
     """Generate a random key of KEY_LEN bytes."""
-    while True:
-        k = np.random.bytes(KEY_LEN)
-        if len(k) == KEY_LEN:
-            return k
+    return os.urandom(KEY_LEN)
 
 
 def ro_hash(data: bytes, len_enc: int) -> bytes:

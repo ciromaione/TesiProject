@@ -5,12 +5,13 @@ import concurrent.futures as cf
 
 import src.communication as com
 from src.utils import MAX_WORKERS
+from src.utils import SymEnc
 
 # The columns to send with OT will be split into chunks of 256 bytes (2048 bits)
 CHUNKS_LEN = 256
 
 
-def encode_message(array: npt.NDArray) -> dict:
+def encode_message(array: npt.NDArray) -> bytes:
     """
     Performs the encoding of a matrix column into a list of integers for the encryption.
     :param array: the column to encode.
@@ -20,17 +21,10 @@ def encode_message(array: npt.NDArray) -> dict:
     data = b''
     for el in array:
         data += el
-    last_chunk_len = len(data) % CHUNKS_LEN
-    values = []
-    for i in range(0, len(data), CHUNKS_LEN):
-        values.append(int.from_bytes(data[i: i + CHUNKS_LEN], 'big'))
-    return {
-        "lc": last_chunk_len,
-        "vals": values
-    }
+    return data
 
 
-def decode_message(data: dict, len_enc: int) -> npt.NDArray:
+def decode_message(data: bytes, len_enc: int) -> npt.NDArray:
     """
     Performs the decoding of an encoded matrix column.
     :param data: the encoded dict in the form of '{"lc": _, "vals": []}' where lc is the length in byte of the last
@@ -38,15 +32,7 @@ def decode_message(data: dict, len_enc: int) -> npt.NDArray:
     :param len_enc: length of the encoding for the garbled cells of the matrix.
     :return: the original column matrix.
     """
-    values = data["vals"]
-    last = values.pop()
-    raw = b''
-    for v in values:
-        try:
-            raw += v.to_bytes(CHUNKS_LEN, 'big')
-        except OverflowError:
-            print("value: ", v)
-    raw += last.to_bytes(data["lc"], 'big')
+    raw = data
     mess = [raw[i:i + len_enc] for i in range(0, len(raw), len_enc)]
     return np.array(mess, dtype=object)
 
@@ -86,12 +72,14 @@ class OTSender:
                 futures_set.add(future)
 
         # Waiting for the results from the completing of the tasks.
-        enc_cols = [None] * instances
+        chosen_keys = [None] * instances
+        enc_matrices = [None] * instances
         for future in cf.as_completed(futures_set):
-            i, res = future.result()
-            enc_cols[i] = res
+            i, chosen_key, enc_cols = future.result()
+            chosen_keys[i] = chosen_key
+            enc_matrices[i] = enc_cols
 
-        self.socket.send_wait(enc_cols)  # sending the encrypted columns.
+        self.socket.send_wait((chosen_keys, enc_matrices))  # sending the encrypted columns.
 
     @staticmethod
     def _encrypt_secret(
@@ -110,28 +98,21 @@ class OTSender:
         :param choice_bits: encrypted choice bits received form the client.
         :return: the i-th chosen encrypted secret.
         """
-        secrets = tuple(encode_message(matrix[:, i]) for i in range(n))  # list of secrets encoded
+        symenc = SymEnc()
+        secrets = tuple(symenc.genKey() for _ in range(n))
+        encrypted_cols = tuple(symenc.encrypt(secrets[i], encode_message(matrix[:, i])) for i in range(n))
 
-        # for the encoding the ciphertext is split in chunks
-        n_ciphertexts = len(secrets[0]["vals"])  # number of chunks
-        ciphertexts = [pk.encrypt(0) for _ in range(n_ciphertexts)]  # chunks initialized at 0
-
-        # encryption of the chunks
+        chosen_key = None
         for b, s in zip(choice_bits, secrets):
-            for i in range(n_ciphertexts):
-                ciphertexts[i] += b * s["vals"][i]
+            s = int.from_bytes(s, 'big')
+            if chosen_key:
+                chosen_key += b * s
+            else:
+                chosen_key = b * s
 
-        # encryption of the last chunk size
-        last_chunk_size = pk.encrypt(0)
-        for i, b in enumerate(choice_bits):
-            last_chunk_size += b * secrets[i]["lc"]
+        chosen_key += pk.encrypt(0)
 
-        res = {
-            "lc": last_chunk_size,
-            "vals": ciphertexts
-        }
-
-        return index, res
+        return index, chosen_key, encrypted_cols
 
 
 class OTReceiver:
@@ -177,12 +158,12 @@ class OTReceiver:
                 i, enc_choice = future.result()
                 enc_choices[i] = enc_choice
 
-            ciphertexts = self.socket.send_wait(enc_choices)  # The ciphertexts received from server.
+            chosen_keys, enc_matrices = self.socket.send_wait(enc_choices)  # The ciphertexts received from server.
             self.socket.send(True)  # For socket sync.
             futures_set = set()
-            for i, ciphertext in enumerate(ciphertexts):
+            for i, choice in enumerate(choices):
                 # Submitting the decryption of a column as a parallel task.
-                future = executor.submit(self._decrypt_col, self.secret_key, self.len_enc_states, i, ciphertext)
+                future = executor.submit(self._decrypt_col, self.secret_key, self.len_enc_states, i, choice, chosen_keys[i], enc_matrices[i])
                 futures_set.add(future)
 
             # Waiting for the results from the completing of the tasks.
@@ -208,7 +189,7 @@ class OTReceiver:
         return index, enc_choice
 
     @staticmethod
-    def _decrypt_col(sk: paillier.PaillierPrivateKey, len_enc_states: int, index: int, ciphertext):
+    def _decrypt_col(sk: paillier.PaillierPrivateKey, len_enc_states: int, index: int, choice, chosen_key, enc_matrix):
         """
         Worker for decryption of a column.
         :param sk: secret key.
@@ -217,9 +198,8 @@ class OTReceiver:
         :param ciphertext: the received ciphertext.
         :return: the decrypted column.
         """
-        lc = sk.decrypt(ciphertext["lc"])  # decryption of the last chunk size.
-        values = [sk.decrypt(v) for v in ciphertext["vals"]]  # decryption of the chunks.
-        return index, decode_message({  # decoding the decrypted secret.
-            "lc": lc,
-            "vals": values
-        }, len_enc_states)
+
+        symenc = SymEnc()
+        key = sk.decrypt(chosen_key).to_bytes(symenc.KEY_SIZE, 'big')
+        col = decode_message(symenc.decrypt(key, enc_matrix[choice]), len_enc_states)
+        return index, col

@@ -2,6 +2,7 @@ import os
 import numpy as np
 import numpy.typing as npt
 import math
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 MAX_WORKERS = os.cpu_count() + 4
 
@@ -65,3 +66,21 @@ class DFA:
         for ch in string:
             state = self.transition_matrix[state, self.alphabet.decode(ch)]
         return state in self.accept
+
+
+class SymEnc:
+
+    def __init__(self, keySize: int = 16):
+        self.KEY_SIZE = keySize
+
+    def genKey(self) -> bytes:
+        return os.urandom(self.KEY_SIZE)
+
+    @staticmethod
+    def encrypt(key: bytes, msg: bytes) -> bytes:
+        nonce = os.urandom(12)
+        return nonce + AESGCM(key).encrypt(nonce, msg, b"")
+
+    @staticmethod
+    def decrypt(key: bytes, ciphertext: bytes) -> bytes:
+        return AESGCM(key).decrypt(ciphertext[:12], ciphertext[12:], b"")
